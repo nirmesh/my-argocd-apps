@@ -1,0 +1,316 @@
+# Secret for Hugging Face Token
+apiVersion: v1
+kind: Secret
+metadata:
+  name: hf-token
+  namespace: test-rag
+type: Opaque
+stringData:
+  token: xxx # Replace with your Hugging Face token
+
+---
+
+
+# PersistentVolume for vLLM Models
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: vllm-models-pv
+spec:
+  capacity:
+    storage: 20Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-storage
+  local:
+    path: /mnt/vllm-models
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+          - key: kubernetes.io/hostname
+            operator: In
+            values:
+            - k8s-worker
+
+---
+# PersistentVolumeClaim for vLLM Models
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vllm-models-pvc
+  namespace: test-rag
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: local-storage
+
+---
+# PersistentVolume for OpenWebUI Data
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: openwebui-data-pv
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-storage
+  local:
+    path: /mnt/openwebui-data
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+          - key: kubernetes.io/hostname
+            operator: In
+            values:
+            - k8s-worker
+
+---
+# PersistentVolumeClaim for OpenWebUI Data
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: openwebui-data-pvc
+  namespace: test-rag
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: local-storage
+
+---
+# PersistentVolume for ChromaDB Data
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: chromadb-data-pv
+spec:
+  capacity:
+    storage: 5Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-storage
+  local:
+    path: /mnt/chromadb-data
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+          - key: kubernetes.io/hostname
+            operator: In
+            values:
+            - k8s-worker
+
+---
+# PersistentVolumeClaim for ChromaDB Data
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: chromadb-data-pvc
+  namespace: test-rag
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: local-storage
+
+---
+# vLLM Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm
+  namespace: test-rag
+  labels:
+    app: vllm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vllm
+  template:
+    metadata:
+      labels:
+        app: vllm
+    spec:
+      imagePullSecrets:
+        - name: docker-secret
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:latest
+          args:
+              - "--model"
+              - "meta-llama/Meta-Llama-3-8B-Instruct" # Chat model
+              - "--port"
+              - "8000"
+              - "--host"
+              - "0.0.0.0"
+              - "--download-dir"
+              - "/models"
+              - "--served-model-name"
+              - "llama-3-8b-instruct,BAAI/bge-base-en-v1.5"
+          env:
+            - name: HUGGING_FACE_HUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hf-token
+                  key: token
+            - name: VLLM_API_KEY
+              value: "token-abc123"
+            - name: VLLM_PORT
+              value: "8000" # Explicitly set to match --port argument
+          ports:
+            - containerPort: 8000
+          volumeMounts:
+            - name: models
+              mountPath: /models
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: vllm-models-pvc
+      restartPolicy: Always
+
+---
+# vLLM Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm
+  namespace: test-rag
+spec:
+  selector:
+    app: vllm
+  ports:
+    - protocol: TCP
+      port: 8000
+      targetPort: 8000
+  type: ClusterIP
+
+---
+# OpenWebUI Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openwebui
+  namespace: test-rag
+  labels:
+    app: openwebui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: openwebui
+  template:
+    metadata:
+      labels:
+        app: openwebui
+    spec:
+      containers:
+        - name: openwebui
+          image: ghcr.io/open-webui/open-webui:main
+          env:
+            - name: OPENAI_API_BASE_URL
+              value: "http://vllm:8000/v1"
+            - name: OPENAI_API_KEY
+              value: "token-abc123" # Must match VLLM_API_KEY if set
+            - name: PORT
+              value: "8080"
+            - name: RAG_EMBEDDING_MODEL
+              value: "BAAI/bge-base-en-v1.5" # Specify embedding model
+            - name: CHROMA_DATA_DIR
+              value: "/app/backend/data/chroma"
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: data
+              mountPath: /app/backend/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: openwebui-data-pvc
+      restartPolicy: Always
+
+---
+# OpenWebUI Service (NodePort)
+apiVersion: v1
+kind: Service
+metadata:
+  name: openwebui
+  namespace: test-rag
+spec:
+  selector:
+    app: openwebui
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+  type: ClusterIP
+
+---
+# ChromaDB Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chromadb
+  namespace: test-rag
+  labels:
+    app: chromadb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chromadb
+  template:
+    metadata:
+      labels:
+        app: chromadb
+    spec:
+      imagePullSecrets:
+        - name: docker-secret
+      containers:
+        - name: chromadb
+          image: chromadb/chroma:latest
+          ports:
+            - containerPort: 8000
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          env:
+            - name: CHROMA_SERVER_HOST
+              value: "0.0.0.0"
+            - name: CHROMA_SERVER_PORT
+              value: "8000"
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: chromadb-data-pvc
+      restartPolicy: Always
+
+---
+# ChromaDB Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: chromadb
+  namespace: test-rag
+spec:
+  selector:
+    app: chromadb
+  ports:
+    - protocol: TCP
+      port: 8000
+      targetPort: 8000
+  type: ClusterIP
