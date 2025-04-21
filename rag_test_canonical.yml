@@ -3,10 +3,10 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: hf-token
-  namespace: test-rag
+  namespace: rag-pipeline
 type: Opaque
 stringData:
-  token: xxx # Replace with your Hugging Face token
+  token: xxxxx # Replace with your Hugging Face token
 
 ---
 
@@ -15,7 +15,7 @@ stringData:
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: vllm-models-pv
+  name: vllm-models-pv-canonical
 spec:
   capacity:
     storage: 20Gi
@@ -24,7 +24,7 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: local-storage
   local:
-    path: /mnt/vllm-models
+    path: /mnt/canonical/vllm-models
   nodeAffinity:
     required:
       nodeSelectorTerms:
@@ -40,7 +40,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: vllm-models-pvc
-  namespace: test-rag
+  namespace: rag-pipeline
 spec:
   accessModes:
     - ReadWriteOnce
@@ -54,7 +54,7 @@ spec:
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: openwebui-data-pv
+  name: openwebui-data-pv-canonical
 spec:
   capacity:
     storage: 1Gi
@@ -63,7 +63,7 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: local-storage
   local:
-    path: /mnt/openwebui-data
+    path: /mnt/canonical/openwebui-data
   nodeAffinity:
     required:
       nodeSelectorTerms:
@@ -79,7 +79,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: openwebui-data-pvc
-  namespace: test-rag
+  namespace: rag-pipeline
 spec:
   accessModes:
     - ReadWriteOnce
@@ -93,7 +93,7 @@ spec:
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: chromadb-data-pv
+  name: chromadb-data-pv-canonical
 spec:
   capacity:
     storage: 5Gi
@@ -102,7 +102,7 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: local-storage
   local:
-    path: /mnt/chromadb-data
+    path: /mnt/canonical/chromadb-data
   nodeAffinity:
     required:
       nodeSelectorTerms:
@@ -118,7 +118,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: chromadb-data-pvc
-  namespace: test-rag
+  namespace: rag-pipeline
 spec:
   accessModes:
     - ReadWriteOnce
@@ -128,12 +128,11 @@ spec:
   storageClassName: local-storage
 
 ---
-# vLLM Deployment
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: vllm
-  namespace: test-rag
+  namespace: rag-pipeline
   labels:
     app: vllm
 spec:
@@ -152,16 +151,16 @@ spec:
         - name: vllm
           image: vllm/vllm-openai:latest
           args:
-              - "--model"
-              - "meta-llama/Meta-Llama-3-8B-Instruct" # Chat model
-              - "--port"
-              - "8000"
-              - "--host"
-              - "0.0.0.0"
-              - "--download-dir"
-              - "/models"
-              - "--served-model-name"
-              - "llama-3-8b-instruct,BAAI/bge-base-en-v1.5"
+            - "--model"
+            - "meta-llama/Meta-Llama-3-8B-Instruct" # Chat model
+            - "--port"
+            - "8000"
+            - "--host"
+            - "0.0.0.0"
+            - "--download-dir"
+            - "/models"
+            - "--served-model-name"
+            - "llama-3-8b-instruct" # Single model name
           env:
             - name: HUGGING_FACE_HUB_TOKEN
               valueFrom:
@@ -171,7 +170,7 @@ spec:
             - name: VLLM_API_KEY
               value: "token-abc123"
             - name: VLLM_PORT
-              value: "8000" # Explicitly set to match --port argument
+              value: "8000"
           ports:
             - containerPort: 8000
           volumeMounts:
@@ -182,14 +181,13 @@ spec:
           persistentVolumeClaim:
             claimName: vllm-models-pvc
       restartPolicy: Always
-
 ---
 # vLLM Service
 apiVersion: v1
 kind: Service
 metadata:
   name: vllm
-  namespace: test-rag
+  namespace: rag-pipeline
 spec:
   selector:
     app: vllm
@@ -205,7 +203,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: openwebui
-  namespace: test-rag
+  namespace: rag-pipeline
   labels:
     app: openwebui
 spec:
@@ -249,7 +247,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: openwebui
-  namespace: test-rag
+  namespace: rag-pipeline
 spec:
   selector:
     app: openwebui
@@ -265,7 +263,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: chromadb
-  namespace: test-rag
+  namespace: rag-pipeline
   labels:
     app: chromadb
 spec:
@@ -305,7 +303,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: chromadb
-  namespace: test-rag
+  namespace: rag-pipeline
 spec:
   selector:
     app: chromadb
